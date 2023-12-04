@@ -106,6 +106,9 @@ class PingPong:
         stop all running processes
         """
         print("shutting down")
+
+        self._server_socket.shutdown(socket.SHUT_RDWR)
+        self._server_socket.close()
         self.running = False
 
         exit(0)
