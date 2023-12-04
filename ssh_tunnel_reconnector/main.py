@@ -1,7 +1,7 @@
-from asyncio import gather, sleep, new_event_loop, set_event_loop
-from asyncio import get_event_loop
+from threading import Thread
 from subprocess import Popen
 from datetime import time
+from time import sleep
 import socket
 import signal
 
@@ -30,7 +30,7 @@ class PingPong:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(("0.0.0.0", PORT))
         self._server_socket.setblocking(False)
-        self._server_socket.settimeout(10)
+        self._server_socket.settimeout(time_to_seconds(ON_FAIL_DELAY))
         self._server_socket.setsockopt(
             socket.SOL_SOCKET,
             socket.SO_REUSEADDR,
@@ -40,58 +40,60 @@ class PingPong:
 
         self.running = True
 
-    async def accept_ping(self) -> None:
+    def accept_ping(self) -> None:
         """
         waits for clients (itself) to connect and sends an 8-byte long message
         """
-        async_loop = get_event_loop()
         while self.running:
+            # start client
+            t = Thread(target=self.ping)
+            t.start()
+
             # using timeouts because otherwise the sock_accept function wouldn't
             # notice self.running being set to false
             try:
-                client, _ = await async_loop.sock_accept(self._server_socket)
+                client, _ = self._server_socket.accept()
 
             except TimeoutError:
+                sleep(time_to_seconds(ON_FAIL_DELAY))
                 continue
 
-            await async_loop.sock_sendall(client, b"-hellow-")
+            client.sendall(b"-hellow-")
             client.close()
 
-    async def periodic_ping(self) -> None:
+            # wait for client thread to finish
+            t.join()
+
+            # wait for next iteration
+            sleep(time_to_seconds(PING_INTERVAL))
+
+    @staticmethod
+    def ping() -> None:
         """
-        periodically sends out pings (to itself, technically)
+        sends out a ping (to itself, technically)
         """
-        # give the server some time before the clients first ping
-        await sleep(time_to_seconds(ON_FAIL_DELAY))
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(10)
 
-        async_loop = get_event_loop()
-        while self.running:
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.settimeout(10)
+        try:
+            # try to connect to server
+            client.connect((PUBLIC_HOST, PORT))
+            client.recv(8)
+            print("ping worked")
 
-            try:
-                client.connect((PUBLIC_HOST, PORT))
-                await async_loop.sock_recv(client, 8)
-                print("ping worked")
+        except TimeoutError:
+            # in case of TimeoutError, restart the ssh_tunnel service
+            print("couldn't reach, restarting")
+            Popen(["sudo", "systemctl", "restart", SERVICE_NAME])
 
-            except TimeoutError:
-                print("couldn't reach, restarting")
-                Popen(["sudo", "systemctl", "restart", SERVICE_NAME])
-                await sleep(time_to_seconds(ON_FAIL_DELAY))
-                continue
+        finally:
+            client.close()
 
-            finally:
-                await sleep(time_to_seconds(PING_INTERVAL))
-                client.close()
-
-    async def run(self) -> None:
+    def run(self) -> None:
         """
         starts both client and server
         """
-        await gather(
-            self.accept_ping(),
-            self.periodic_ping()
-        )
+        self.accept_ping()
 
     def close(self) -> None:
         """
@@ -100,7 +102,6 @@ class PingPong:
         print("shutting down")
         self.running = False
 
-        get_event_loop().stop()
         exit(0)
 
 
@@ -109,7 +110,5 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, lambda *_: pp.close())
     signal.signal(signal.SIGTERM, lambda *_: pp.close())
 
-    loop = new_event_loop()
-    set_event_loop(loop)
-    loop.run_until_complete(pp.run())
+    pp.run()
     pp.close()
