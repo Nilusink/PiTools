@@ -27,6 +27,7 @@ class PingPong:
     running: bool
 
     def __init__(self) -> None:
+        # create server socket
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(("0.0.0.0", PORT))
         self._server_socket.setblocking(False)
@@ -34,6 +35,11 @@ class PingPong:
         self._server_socket.setsockopt(
             socket.SOL_SOCKET,
             socket.SO_REUSEADDR,
+            1
+        )
+        self._server_socket.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEPORT,
             1
         )
         self._server_socket.listen()
