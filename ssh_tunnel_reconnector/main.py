@@ -7,9 +7,20 @@ import signal
 
 
 SERVICE_NAME: str = "ssh_tunnels"
-PUBLIC_HOST: str = "128.0.0.1"
-PING_INTERVAL: time = time(second=2)
+PUBLIC_HOST: str = "server.nilus.ink"
+PING_INTERVAL: time = time(minute=2)
+ON_FAIL_DELAY: time = time(second=10)
 PORT: int = 20000
+
+
+def time_to_seconds(t: time) -> int:
+    """
+    converts time dataclass to only seconds (add up hours + minutes + seconds)
+
+    :param t: input time
+    :return: equivalent time in seconds
+    """
+    return t.second + t.minute * 60 + t.hour * 3600
 
 
 class PingPong:
@@ -19,6 +30,7 @@ class PingPong:
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.bind(("0.0.0.0", PORT))
         self._server_socket.setblocking(False)
+        self._server_socket.settimeout(10)
         self._server_socket.setsockopt(
             socket.SOL_SOCKET,
             socket.SO_REUSEADDR,
@@ -34,7 +46,13 @@ class PingPong:
         """
         async_loop = get_event_loop()
         while self.running:
-            client, _ = await async_loop.sock_accept(self._server_socket)
+            # using timeouts because otherwise the sock_accept function wouldn't
+            # notice self.running being set to false
+            try:
+                client, _ = await async_loop.sock_accept(self._server_socket)
+
+            except TimeoutError:
+                continue
 
             await async_loop.sock_sendall(client, b"-hellow-")
             client.close()
@@ -43,6 +61,9 @@ class PingPong:
         """
         periodically sends out pings (to itself, technically)
         """
+        # give the server some time before the clients first ping
+        await sleep(time_to_seconds(ON_FAIL_DELAY))
+
         async_loop = get_event_loop()
         while self.running:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -56,22 +77,26 @@ class PingPong:
             except TimeoutError:
                 print("couldn't reach, restarting")
                 Popen(["sudo", "systemctl", "restart", SERVICE_NAME])
+                await sleep(time_to_seconds(ON_FAIL_DELAY))
+                continue
 
             finally:
-                await sleep(
-                    PING_INTERVAL.second
-                    + PING_INTERVAL.minute * 60
-                    + PING_INTERVAL.hour * 3600
-                )
+                await sleep(time_to_seconds(PING_INTERVAL))
                 client.close()
 
     async def run(self) -> None:
+        """
+        starts both client and server
+        """
         await gather(
             self.accept_ping(),
             self.periodic_ping()
         )
 
     def close(self) -> None:
+        """
+        stop all running processes
+        """
         self.running = False
 
 
