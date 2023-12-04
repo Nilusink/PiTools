@@ -7,7 +7,7 @@ import signal
 
 
 SERVICE_NAME: str = "ssh_tunnels"
-PUBLIC_HOST: str = "server.nilus.ink"
+PUBLIC_HOST: str = "127.0.0.1"
 PING_INTERVAL: time = time(minute=2)
 ON_FAIL_DELAY: time = time(second=10)
 PORT: int = 20000
@@ -97,7 +97,11 @@ class PingPong:
         """
         stop all running processes
         """
+        print("shutting down")
         self.running = False
+
+        get_event_loop().stop()
+        exit(0)
 
 
 if __name__ == "__main__":
