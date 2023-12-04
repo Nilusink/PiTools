@@ -1,0 +1,1 @@
+Periodically ping itself and if the ping doesn't connect, the ssh-tunnel service is restarted.
