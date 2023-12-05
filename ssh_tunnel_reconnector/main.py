@@ -42,7 +42,6 @@ def check_connection(server: str = PUBLIC_I_HOST, timeout: float = 5) -> bool:
 
     :return: server reachable or nit
     """
-    request.urlopen(url=server, timeout=timeout)
     try:
         request.urlopen(url=server, timeout=timeout)
         return True
@@ -94,6 +93,8 @@ class PingPong:
             t.join()
 
             # wait for next iteration
+            # No need to constantly check for self.running, since `exit` is
+            # called anyway and this function runs in the same thread.
             sleep(time_to_seconds(PING_INTERVAL))
 
     @staticmethod
@@ -147,6 +148,7 @@ class PingPong:
 
 
 if __name__ == "__main__":
+    # configure logging
     logging.basicConfig(
         filename="reconnector.log",
         encoding="utf-8",
@@ -156,9 +158,13 @@ if __name__ == "__main__":
     # add handler to also print to stdout
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
+    # create PingPong instance
     pp = PingPong()
+
+    # intercept SIGINT and SIGTERM
     signal.signal(signal.SIGINT, lambda *_: pp.close())
     signal.signal(signal.SIGTERM, lambda *_: pp.close())
 
+    # start the reconnector
     pp.run()
     pp.close()
