@@ -1,13 +1,26 @@
+"""
+main.py
+04. December 2023
+
+automatically restarts ssh-tunnels
+
+Author:
+Nilusink
+"""
+from time import sleep, strftime
 from threading import Thread
 from subprocess import Popen
+from urllib import request
 from datetime import time
-from time import sleep
+import logging
 import socket
 import signal
+import sys
 
 
 SERVICE_NAME: str = "ssh_tunnels"
-PUBLIC_HOST: str = "127.0.0.1"
+PUBLIC_HOST: str = "server.nilus.ink"
+PUBLIC_I_HOST: str = "http://server.nilus.ink:80"
 PING_INTERVAL: time = time(minute=2)
 ON_FAIL_DELAY: time = time(second=10)
 PORT: int = 20000
@@ -23,6 +36,21 @@ def time_to_seconds(t: time) -> int:
     return t.second + t.minute * 60 + t.hour * 3600
 
 
+def check_connection(server: str = PUBLIC_I_HOST, timeout: float = 5) -> bool:
+    """
+    tries to request a GET from the given server
+
+    :return: server reachable or nit
+    """
+    request.urlopen(url=server, timeout=timeout)
+    try:
+        request.urlopen(url=server, timeout=timeout)
+        return True
+
+    except request.URLError:
+        return False
+
+
 class PingPong:
     running: bool
 
@@ -35,11 +63,6 @@ class PingPong:
         self._server_socket.setsockopt(
             socket.SOL_SOCKET,
             socket.SO_REUSEADDR,
-            1
-        )
-        self._server_socket.setsockopt(
-            socket.SOL_SOCKET,
-            socket.SO_REUSEPORT,
             1
         )
         self._server_socket.listen()
@@ -85,12 +108,21 @@ class PingPong:
             # try to connect to server
             client.connect((PUBLIC_HOST, PORT))
             client.recv(8)
-            print("ping worked")
+            logging.info(f"{strftime('%c')}: ping OK")
 
-        except TimeoutError:
+        except (TimeoutError, ConnectionRefusedError):
             # in case of TimeoutError, restart the ssh_tunnel service
-            print("couldn't reach, restarting")
-            Popen(["sudo", "systemctl", "restart", SERVICE_NAME])
+            logging.warning(f"{strftime('%c')}: ping FAIL")
+
+            # try if internet is reachable
+            if check_connection():
+                logging.warning(
+                    f"{strftime('%c')}: internet reachable, RESTARTING"
+                )
+                Popen(["sudo", "systemctl", "restart", SERVICE_NAME])
+
+            else:
+                logging.error(f"{strftime('%c')}: internet UNREACHABLE")
 
         finally:
             client.close()
@@ -105,7 +137,7 @@ class PingPong:
         """
         stop all running processes
         """
-        print("shutting down")
+        logging.info(f"{strftime('%c')}: shutting down")
 
         self._server_socket.shutdown(socket.SHUT_RDWR)
         self._server_socket.close()
@@ -115,6 +147,15 @@ class PingPong:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        filename="reconnector.log",
+        encoding="utf-8",
+        level=logging.INFO,
+    )
+
+    # add handler to also print to stdout
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
     pp = PingPong()
     signal.signal(signal.SIGINT, lambda *_: pp.close())
     signal.signal(signal.SIGTERM, lambda *_: pp.close())
