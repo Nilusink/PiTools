@@ -22,7 +22,7 @@ SERVICE_NAME: str = "ssh_tunnels"
 PUBLIC_HOST: str = "server.nilus.ink"
 PUBLIC_I_HOST: str = "http://server.nilus.ink:80"
 PING_INTERVAL: time = time(minute=2)
-ON_FAIL_DELAY: time = time(second=10)
+ON_FAIL_DELAY: time = time(second=20)
 PORT: int = 20000
 
 
@@ -42,6 +42,7 @@ def check_connection(server: str = PUBLIC_I_HOST, timeout: float = 5) -> bool:
 
     :return: server reachable or nit
     """
+    request.urlopen(url=server, timeout=timeout)
     try:
         request.urlopen(url=server, timeout=timeout)
         return True
@@ -86,15 +87,19 @@ class PingPong:
                 sleep(time_to_seconds(ON_FAIL_DELAY))
                 continue
 
-            client.sendall(b"-hellow-")
-            client.close()
+            try:
+                client.sendall(b"-hellow-")
+
+            except (BrokenPipeError, ConnectionResetError) as e:
+                logging.warning(f"{strftime('%c')}: failed to SEND: \"{e}\"")
+
+            finally:
+                client.close()
 
             # wait for client thread to finish
             t.join()
 
             # wait for next iteration
-            # No need to constantly check for self.running, since `exit` is
-            # called anyway and this function runs in the same thread.
             sleep(time_to_seconds(PING_INTERVAL))
 
     @staticmethod
@@ -111,9 +116,9 @@ class PingPong:
             client.recv(8)
             logging.info(f"{strftime('%c')}: ping OK")
 
-        except (TimeoutError, ConnectionRefusedError):
+        except (TimeoutError, ConnectionRefusedError) as e:
             # in case of TimeoutError, restart the ssh_tunnel service
-            logging.warning(f"{strftime('%c')}: ping FAIL")
+            logging.warning(f"{strftime('%c')}: ping FAIL: \"{e}\"")
 
             # try if internet is reachable
             if check_connection():
@@ -124,6 +129,9 @@ class PingPong:
 
             else:
                 logging.error(f"{strftime('%c')}: internet UNREACHABLE")
+
+        except socket.gaierror:
+            logging.error(f"{strftime('%c')}: failure in NAMERESOLUTION")
 
         finally:
             client.close()
@@ -148,23 +156,18 @@ class PingPong:
 
 
 if __name__ == "__main__":
-    # configure logging
     logging.basicConfig(
         filename="reconnector.log",
         encoding="utf-8",
-        level=logging.INFO,
+        level=logging.WARNING,
     )
 
     # add handler to also print to stdout
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
-    # create PingPong instance
     pp = PingPong()
-
-    # intercept SIGINT and SIGTERM
     signal.signal(signal.SIGINT, lambda *_: pp.close())
     signal.signal(signal.SIGTERM, lambda *_: pp.close())
 
-    # start the reconnector
     pp.run()
     pp.close()
