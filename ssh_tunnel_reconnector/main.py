@@ -38,7 +38,6 @@ def check_connection(server: str, timeout: float = 5) -> bool:
 
     :return: server reachable or nit
     """
-    request.urlopen(url=server, timeout=timeout)
     try:
         request.urlopen(url=server, timeout=timeout)
         return True
